@@ -19,9 +19,11 @@ It includes:
 ## 1. Repository Structure
 
 At the top level:
+## 1. Repository Structure
 
-```
+At the top level:
 
+```text
 CoSRe/
 ├── cfg/                       # YAML / config files (model, data, optimization, deepspeed, etc.)
 ├── model_utils/
@@ -30,7 +32,7 @@ CoSRe/
 │   │   ├── shared_residual.py # Shared-slot extraction and modality residual formation
 │   │   ├── controller.py      # CoSRe controller / interfaces used by decoding
 │   │   ├── hooks.py           # Optional hooks to integrate CoSRe into generation
-│   │   └── **init**.py
+│   │   └── __init__.py
 │   ├── logging.py             # Logging helpers
 │   └── wrapped_visualizer.py  # Optional visualization / debugging utilities
 ├── prompt/                    # Prompt templates and instruction formats
@@ -43,7 +45,6 @@ CoSRe/
 ├── requirements_clean.txt     # Minimal / cleaned dependency list
 └── README.md                  # This file
 
-````
 
 ---
 
