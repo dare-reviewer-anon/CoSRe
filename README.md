@@ -1,45 +1,4 @@
-Good catch — there are **three concrete Markdown bugs** that make this README fail to render:
 
-### What’s broken (precisely)
-
-1. **Duplicate section header**
-
-   ```md
-   ## 1. Repository Structure
-   At the top level:
-   ## 1. Repository Structure
-   ```
-
-   → breaks structure and confuses renderers.
-
-2. **Unclosed code block**
-   Your repository tree block:
-
-   ````md
-   ```text
-   CoSRe/
-   ...
-   └── README.md
-   ````
-
-   ❌ **missing closing triple backticks** before `---`.
-
-3. **Mismatched fence at the end**
-
-   * You open with ```markdown
-   * You close with ```
-     → GitHub treats everything as code.
-
----
-
-Below is a **fully corrected, clean, GitHub-renderable README**.
-You can **copy–paste this verbatim**.
-
----
-
-## ✅ **FIXED & IMPROVED README.md (RENDERABLE)**
-
-````markdown
 # CoSRe: Cosine-Compressed Shared–Residual Factorization for Efficient Multimodal Spatial Reasoning
 
 This repository contains the implementation of **CoSRe** (Cosine-Compressed Shared–Residual Factorization), built on top of the **Anole** multimodal LLM and the **MVoT** interleaved visual–text reasoning framework.
