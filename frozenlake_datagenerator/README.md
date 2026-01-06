@@ -1,4 +1,4 @@
-# FrozenLake Dataset Generation (for DARE Experiments)
+# FrozenLake Dataset Generation (for COSRE Experiments)
 
 This folder contains the code we use to **generate the FrozenLake trajectory datasets** used in our experiments.
 The script procedurally generates maps (for sizes 3×3, 4×4, 5×5, 6×6), trains a **Q-learning agent** on each map, and then collects **balanced trajectories** with labels:

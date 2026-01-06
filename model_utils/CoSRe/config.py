@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 @dataclass
-class DAREConfig:
+class COSREConfig:
     """
-    Hyper-parameters for DARE routing & pruning.
+    Hyper-parameters for COSRE routing & pruning.
     """
     hidden_size: Optional[int] = None
     num_layers: Optional[int] = None

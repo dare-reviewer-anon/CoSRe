@@ -82,8 +82,8 @@ def init(args):
         generation_num_beams=training_cfg['model']['generation_num_beams']
     )
 
-    # >>> NEW: memory-friendly settings for 4×A100 (and H100) <<<
-    # Use bf16 on A100/H100 (stable reduced precision)
+    # >>> NEW: memory-friendly settings for 4×h100 (and H100) <<<
+    # Use bf16 on h100/H100 (stable reduced precision)
     training_args.bf16 = True
     training_args.fp16 = False
 
@@ -91,7 +91,7 @@ def init(args):
     training_args.gradient_checkpointing = True
 
     # Use DeepSpeed ZeRO-3 for parameter sharding across GPUs
-    ds_config_path = os.path.join(args.cfg_path, "ds_zero3_4A100.json")
+    ds_config_path = os.path.join(args.cfg_path, "ds_zero3_4h100.json")
     training_args.deepspeed = ds_config_path
     # <<< END NEW >>>
 

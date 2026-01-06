@@ -1,4 +1,4 @@
-# model_utils/dare/__init__.py
+# model_utils/CoSRe/__init__.py
 
 import logging
 from typing import List
@@ -13,7 +13,7 @@ from .controller import (
     DAREController,
     ModalityRouter,
     gather_prune_kv,
-    attach_dare_to_anole,
+    attach_CoSRe_to_anole,
 )
 from .attention import EfficientAttention
 from .wrapped_block import DAREWrappedBlock
@@ -23,7 +23,7 @@ __all__ = [
     "DAREController",
     "ModalityRouter",
     "gather_prune_kv",
-    "attach_dare_to_anole",
+    "attach_CoSRe_to_anole",
     "EfficientAttention",
     "DAREWrappedBlock",
 ]
@@ -66,7 +66,7 @@ def _find_transformer_blocks(model: nn.Module) -> List[nn.Module]:
     return cands
 
 
-def attach_dare_to_anole(model: nn.Module, controller: DAREController):
+def attach_CoSRe_to_anole(model: nn.Module, controller: DAREController):
     """
     Wrap every Anole/Chameleon attention block in EfficientAttention and
     attach a shared DAREController.
@@ -97,8 +97,8 @@ def attach_dare_to_anole(model: nn.Module, controller: DAREController):
                 wrapped = attn  # already wrapped
 
             # Attach controller + layer index to the wrapper
-            setattr(wrapped, "dare_controller", controller)
-            setattr(wrapped, "dare_layer_idx", idx)
+            setattr(wrapped, "CoSRe_controller", controller)
+            setattr(wrapped, "CoSRe_layer_idx", idx)
 
             # Replace original attention with the wrapper
             setattr(block, attn_attr_name, wrapped)
@@ -110,7 +110,7 @@ def attach_dare_to_anole(model: nn.Module, controller: DAREController):
     else:
         logger.info(f"[DARE] Attached controller to {num_attn} attention layers.")
 
-    setattr(model, "dare_controller", controller)
-    setattr(model, "dare_enabled", True)
+    setattr(model, "CoSRe_controller", controller)
+    setattr(model, "CoSRe_enabled", True)
 
     return model

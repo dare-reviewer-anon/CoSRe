@@ -16,10 +16,10 @@ class DAREWrappedBlock(nn.Module):
       - input/output layer norms ln1, ln2
     """
 
-    def __init__(self, base_block: nn.Module, dare_controller: DAREController, layer_idx: int):
+    def __init__(self, base_block: nn.Module, CoSRe_controller: DAREController, layer_idx: int):
         super().__init__()
         self.block = base_block
-        self.dare = dare_controller
+        self.CoSRe = CoSRe_controller
         self.layer_idx = layer_idx
 
     def forward(
@@ -43,15 +43,15 @@ class DAREWrappedBlock(nn.Module):
         mlp_out = self.block.mlp(self.block.ln2(hidden_states))
         hidden_states = hidden_states + mlp_out
 
-        dare_out = self.router(
+        CoSRe_out = self.router(
             hidden_states,
             modality_mask=modality_mask,
             hop_idx=hop_idx,
             layer_idx=self.layer_idx,
             training=training,
         )
-        keep_mask = dare_out["keep_mask"]
-        exec_mask = dare_out["exec_mask"]
+        keep_mask = CoSRe_out["keep_mask"]
+        exec_mask = CoSRe_out["exec_mask"]
 
         # pass keep_mask into attention
         attn_out, new_past_kv = self.block.self_attn(
@@ -65,9 +65,9 @@ class DAREWrappedBlock(nn.Module):
         hidden_states = hidden_states * exec_mask.unsqueeze(-1)
 
         aux_losses: Dict[str, torch.Tensor] = {
-            "L_text_ratio": dare_out["L_text_ratio"],
-            "L_vis_soft": dare_out["L_vis_soft"],
-            "L_vis_hard": dare_out["L_vis_hard"],
+            "L_text_ratio": CoSRe_out["L_text_ratio"],
+            "L_vis_soft": CoSRe_out["L_vis_soft"],
+            "L_vis_hard": CoSRe_out["L_vis_hard"],
         }
 
         return hidden_states, new_past_kv, exec_mask, aux_losses

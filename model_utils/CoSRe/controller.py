@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import DAREConfig
+from .config import COSREConfig
 from .diff_topk import DifferentiableTopK
 from .attention import EfficientAttention  
 
@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 
-class DAREController(nn.Module):
-    def __init__(self, cfg: DAREConfig):
+class COSREController(nn.Module):
+    def __init__(self, cfg: COSREConfig):
         super().__init__()
         self.cfg = cfg
         self.register_buffer("num_routed_steps", torch.zeros(1, dtype=torch.long), persistent=False)
@@ -100,9 +100,9 @@ class DAREController(nn.Module):
         total_hard = cfg.lambda_hard * loss_hard
 
         loss_dict = {
-            "dare_ratio_loss": total_ratio,
-            "dare_soft_loss": total_soft,
-            "dare_hard_loss": total_hard,
+            "CoSRe_ratio_loss": total_ratio,
+            "CoSRe_soft_loss": total_soft,
+            "CoSRe_hard_loss": total_hard,
         }
 
         self._last_losses = loss_dict
@@ -113,10 +113,10 @@ class DAREController(nn.Module):
 
 class ModalityRouter(nn.Module):
     """
-    Thin wrapper around DAREController, so you can easily swap routing logic later.
+    Thin wrapper around COSREController, so you can easily swap routing logic later.
     """
 
-    def __init__(self, controller: DAREController):
+    def __init__(self, controller: COSREController):
         super().__init__()
         self.controller = controller
 
@@ -208,11 +208,11 @@ def _find_transformer_blocks(model: nn.Module) -> List[nn.Module]:
     return cands
 
 
-def attach_dare_to_anole(model: nn.Module, controller: DAREController):
+def attach_CoSRe_to_anole(model: nn.Module, controller: COSREController):
     blocks = _find_transformer_blocks(model)
 
     if not blocks:
-        logger.warning("[DARE] Could not find Transformer blocks. DARE disabled.")
+        logger.warning("[COSRE] Could not find Transformer blocks. COSRE disabled.")
         return model
 
     num_attn = 0
@@ -233,19 +233,19 @@ def attach_dare_to_anole(model: nn.Module, controller: DAREController):
             else:
                 wrapped = attn
 
-            setattr(wrapped.base_attn, "dare_controller", controller)
-            setattr(wrapped.base_attn, "dare_layer_idx", idx)
+            setattr(wrapped.base_attn, "CoSRe_controller", controller)
+            setattr(wrapped.base_attn, "CoSRe_layer_idx", idx)
 
             setattr(block, attn_attr_name, wrapped)
 
             num_attn += 1
 
     if num_attn == 0:
-        logger.warning("[DARE] No attention modules found inside blocks.")
+        logger.warning("[COSRE] No attention modules found inside blocks.")
     else:
-        logger.info(f"[DARE] Attached controller to {num_attn} attention layers.")
+        logger.info(f"[COSRE] Attached controller to {num_attn} attention layers.")
 
-    setattr(model, "dare_controller", controller)
-    setattr(model, "dare_enabled", True)
+    setattr(model, "CoSRe_controller", controller)
+    setattr(model, "CoSRe_enabled", True)
 
     return model

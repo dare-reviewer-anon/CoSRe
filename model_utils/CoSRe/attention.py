@@ -41,7 +41,7 @@ def prune_kv_cache(
 
     if max_kept == 0:
         logger.warning(
-            "[DARE] prune_kv_cache: all entries in keep_mask are 0; "
+            "[COSRE] prune_kv_cache: all entries in keep_mask are 0; "
             "disabling pruning for this forward pass."
         )
         idx = torch.arange(S, device=key_states.device, dtype=torch.long)
@@ -50,7 +50,7 @@ def prune_kv_cache(
 
     if min_kept == 0:
         logger.warning(
-            "[DARE] prune_kv_cache: some batch elements have 0 kept tokens. "
+            "[COSRE] prune_kv_cache: some batch elements have 0 kept tokens. "
             "They will be forced to keep at least one position (prefix)."
         )
 
@@ -94,7 +94,7 @@ def prune_kv_cache(
             attn_pruned = torch.gather(attention_mask, dim=1, index=gather_indices)
         else:
             logger.warning(
-                "[DARE] prune_kv_cache: attention_mask has unsupported shape %s; "
+                "[COSRE] prune_kv_cache: attention_mask has unsupported shape %s; "
                 "it will be returned unchanged.",
                 tuple(attention_mask.shape),
             )
@@ -144,7 +144,7 @@ class EfficientAttention(nn.Module):
         except AttributeError:
             # Fallback: if no k_proj / v_proj exist, just run without pruning
             logger.warning(
-                "[DARE] EfficientAttention: base_attn has no k_proj/v_proj; "
+                "[COSRE] EfficientAttention: base_attn has no k_proj/v_proj; "
                 "skipping KV capture."
             )
             return self.base_attn(*args, **kwargs)
@@ -159,7 +159,7 @@ class EfficientAttention(nn.Module):
         # safety: if we failed to capture K/V, just return
         if "k" not in captured or "v" not in captured:
             logger.warning(
-                "[DARE] EfficientAttention: K/V not captured; returning original output."
+                "[COSRE] EfficientAttention: K/V not captured; returning original output."
             )
             return out
 
@@ -177,7 +177,7 @@ class EfficientAttention(nn.Module):
             keep_mask_flat = keep_mask
         else:
             logger.warning(
-                "[DARE] EfficientAttention: keep_mask has unexpected shape %s; "
+                "[COSRE] EfficientAttention: keep_mask has unexpected shape %s; "
                 "skipping pruning.",
                 tuple(keep_mask.shape),
             )
@@ -189,7 +189,7 @@ class EfficientAttention(nn.Module):
 
         if key_states.dim() != 3 or value_states.dim() != 3:
             logger.warning(
-                "[DARE] EfficientAttention: captured K/V have shape %s and %s; "
+                "[COSRE] EfficientAttention: captured K/V have shape %s and %s; "
                 "expected [B, S, D]. Skipping pruning.",
                 tuple(key_states.shape),
                 tuple(value_states.shape),
@@ -200,7 +200,7 @@ class EfficientAttention(nn.Module):
         H_kv = getattr(self.base_attn, "num_key_value_heads", None)
         if H_kv is None or Dkv % H_kv != 0:
             logger.warning(
-                "[DARE] EfficientAttention: cannot infer head_dim from "
+                "[COSRE] EfficientAttention: cannot infer head_dim from "
                 "Dkv=%d and num_key_value_heads=%s; skipping pruning.",
                 Dkv,
                 str(H_kv),
@@ -218,7 +218,7 @@ class EfficientAttention(nn.Module):
 
         if past is not None:
             try:
-                layer_idx = getattr(self.base_attn, "dare_layer_idx", None)
+                layer_idx = getattr(self.base_attn, "CoSRe_layer_idx", None)
 
                 if layer_idx is not None:
                     # Case 1: transformers.Cache style
@@ -233,18 +233,18 @@ class EfficientAttention(nn.Module):
                     else:
                         # Unknown type; do not crash
                         logger.warning(
-                            "[DARE] EfficientAttention: unknown cache type %s; "
+                            "[COSRE] EfficientAttention: unknown cache type %s; "
                             "KV not overwritten.",
                             type(past),
                         )
                 else:
                     logger.warning(
-                        "[DARE] EfficientAttention: base_attn has no dare_layer_idx; "
+                        "[COSRE] EfficientAttention: base_attn has no CoSRe_layer_idx; "
                         "cannot index into cache."
                     )
             except Exception as e:
                 logger.warning(
-                    "[DARE] EfficientAttention: failed to overwrite KV cache: %s", str(e)
+                    "[COSRE] EfficientAttention: failed to overwrite KV cache: %s", str(e)
                 )
 
         # return same structure

@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=anole-a100-4g
+#SBATCH --job-name=anole-h100-4g
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
-#SBATCH --partition=gpu_a100          
+#SBATCH --partition=gpu_h100          
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ module load Miniconda3/23.5.2-0
 # 2. Environment setup
 #############################
 # Use your conda env without conda init
-export PATH=/home/<USER>/.conda/envs/dare-env/bin:$PATH
+export PATH=/home/<USER>/.conda/envs/COSRE-env/bin:$PATH
 export PYTHONNOUSERSITE=1
 
 # HuggingFace / cache
@@ -48,8 +48,8 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 # Use 4 GPUs on the node
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-# Project root (DARE / Anole + DARE training code)
-cd <FS_ROOT>/DARE
+# Project root (COSRE / Anole + COSRE training code)
+cd <FS_ROOT>/COSRE
 mkdir -p logs
 
 echo "=== Environment check ==="
