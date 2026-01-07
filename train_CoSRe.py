@@ -1,10 +1,9 @@
 # train_CoSRe.py
 import os
-import wandb
-import torch
 import logging
 import argparse
 import yaml
+import torch
 import torch.distributed as dist
 
 from transformers import EarlyStoppingCallback, StopStringCriteria, set_seed
@@ -19,19 +18,40 @@ from utils.evaluator import VisualizationEvaluator
 
 logger = logging.getLogger(__name__)
 
-# ==== W&B placeholders – replace with your real values if you want logging ====
-WANDB_API_KEY = "<YOUR_WANDB_KEY_API>"
-WANDB_ENTITY = "<YOUR_WANDB_ENTITY>"
-PROJECT_NAME = "<YOUR_PROJECT_NAME>"
 
-
-def get_rank_world():
-    """Robust rank/world_size for both single-GPU and DDP."""
+# =========================
+# DDP helpers
+# =========================
+def get_rank_world() -> tuple[int, int]:
     if dist.is_available() and dist.is_initialized():
         return dist.get_rank(), dist.get_world_size()
     return 0, 1
 
 
+def is_rank0() -> bool:
+    r, _ = get_rank_world()
+    return r == 0
+
+
+# =========================
+# Model toggles
+# =========================
+def set_model_cache(model, use_cache: bool):
+    if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+        model.config.use_cache = bool(use_cache)
+
+
+def maybe_enable_model_checkpointing(model):
+    if hasattr(model, "gradient_checkpointing_enable"):
+        try:
+            model.gradient_checkpointing_enable()
+        except TypeError:
+            model.gradient_checkpointing = True
+
+
+# =========================
+# Training args init
+# =========================
 def init_training_args(args):
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     if args.local_rank is not None:
@@ -40,23 +60,23 @@ def init_training_args(args):
     logging.basicConfig(level=logging.INFO)
     set_seed(args.seed)
 
+    # Load config
     setting_type = "interleaved"
-    with open(os.path.join(args.cfg_path, f"{setting_type}.yaml")) as f:
+    with open(os.path.join(args.cfg_path, f"{setting_type}.yaml"), "r") as f:
         training_cfg = yaml.safe_load(f)
 
-    # override cfg if user passes CLI
-    if args.train_bz:
+    # Override cfg if CLI specifies
+    if args.train_bz is not None:
         training_cfg["hyper"]["train_batch_size"] = args.train_bz
-    if args.val_bz:
+    if args.val_bz is not None:
         training_cfg["hyper"]["val_batch_size"] = args.val_bz
-    if args.grad_acc:
+    if args.grad_acc is not None:
         training_cfg["hyper"]["grad_accumulation"] = args.grad_acc
 
     sup_hyper = training_cfg["hyper"]
 
     # Run name
-    args.run_name = create_run_name(args, training_cfg)
-    args.run_name = args.note + args.run_name
+    args.run_name = args.note + create_run_name(args, training_cfg)
 
     training_args = WrappedSeq2SeqTrainingArguments(
         output_dir=os.path.join(args.output, args.run_name),
@@ -71,63 +91,52 @@ def init_training_args(args):
         else None,
         save_total_limit=40,
         seed=args.seed,
-        # supervised tuning hyperparams
-        learning_rate=sup_hyper["lr"],
-        per_device_train_batch_size=sup_hyper["train_batch_size"],
-        gradient_accumulation_steps=sup_hyper["grad_accumulation"],
-        per_device_eval_batch_size=sup_hyper["val_batch_size"],
-        num_train_epochs=sup_hyper["epochs"],
-        logging_steps=training_cfg["logging"]["logging_step"],
+        learning_rate=float(sup_hyper["lr"]),
+        per_device_train_batch_size=int(sup_hyper["train_batch_size"]),
+        gradient_accumulation_steps=int(sup_hyper["grad_accumulation"]),
+        per_device_eval_batch_size=int(sup_hyper["val_batch_size"]),
+        num_train_epochs=float(sup_hyper["epochs"]),
+        logging_steps=int(training_cfg["logging"]["logging_step"]),
         push_to_hub=False,
-        predict_with_generate=training_cfg["model"]["predict_with_generate"],
-        generation_max_new_tokens=training_cfg["model"]["generation_max_new_tokens"],
-        generation_num_beams=training_cfg["model"]["generation_num_beams"],
+        predict_with_generate=bool(training_cfg["model"]["predict_with_generate"]),
+        generation_max_new_tokens=int(training_cfg["model"]["generation_max_new_tokens"]),
+        generation_num_beams=int(training_cfg["model"]["generation_num_beams"]),
     )
 
-    # ===== memory-friendly settings =====
+    # Memory-friendly defaults
     training_args.bf16 = True
     training_args.fp16 = False
     training_args.gradient_checkpointing = True
 
-    ds_config_path = os.path.join(args.cfg_path, "ds_zero3_4h100.json")
-    if os.path.exists(ds_config_path):
-        training_args.deepspeed = ds_config_path
+    # DeepSpeed config: prefer user arg, else try common names
+    ds_cfg = args.deepspeed_config
+    if ds_cfg is None:
+        for cand in ["ds_zero3_4a100.json", "ds_zero3_4h100.json", "ds_zero3_4A100.json", "ds_zero3_4H100.json"]:
+            p = os.path.join(args.cfg_path, cand)
+            if os.path.exists(p):
+                ds_cfg = p
+                break
+    if ds_cfg is not None and os.path.exists(ds_cfg):
+        training_args.deepspeed = ds_cfg
 
-    # ===== CoSRe flags stored in training_args for Trainer/Evaluator =====
-    # CoSRe is inference-time KV-cache compression, so no extra training loss flags here.
-    training_args.enable_CoSRe = args.enable_CoSRe
-    training_args.cosre_block = args.cosre_block
-    training_args.cosre_keep_h = args.cosre_keep_h
-    training_args.cosre_keep_w = args.cosre_keep_w
-    training_args.cosre_slots = args.cosre_slots
-    training_args.cosre_base_delta = args.cosre_base_delta
+    # ===== CoSRe flags saved into training_args (for CustomizeSeq2SeqTrainer) =====
+    training_args.enable_CoSRe = bool(args.enable_CoSRe)
+    training_args.cosre_block = int(args.cosre_block)
+    training_args.cosre_keep_h = int(args.cosre_keep_h)
+    training_args.cosre_keep_w = int(args.cosre_keep_w)
+    training_args.cosre_slots = int(args.cosre_slots)
+    training_args.cosre_base_delta = float(args.cosre_base_delta)
 
-    # ===== W&B =====
-    rank, _ = get_rank_world()
-    args.local_rank = rank
-
-    if args.report_to == "wandb" and rank == 0:
-        wandb.login(key=WANDB_API_KEY)
-        init_args = {}
-        if "MLFLOW_EXPERIMENT_ID" in os.environ:
-            init_args["group"] = os.environ["MLFLOW_EXPERIMENT_ID"]
-
-        wandb.init(
-            project=os.getenv("WANDB_PROJECT", PROJECT_NAME),
-            name=args.run_name,
-            entity=os.getenv("WANDB_ENTITY", WANDB_ENTITY),
-            **init_args,
-        )
-        wandb.config.update(training_args, allow_val_change=True)
-    else:
+    # Report-to: disable if requested
+    if args.report_to in [None, "", "none", "None"]:
         training_args.report_to = []
+    else:
+        training_args.report_to = [args.report_to]
 
-    # ===== checkpoint handling =====
-    # if user points to a finetuned checkpoint, we resume from it
-    if os.path.exists(training_args.output_dir) and args.model_ckpt is None:
-        args.model_ckpt = training_args.output_dir
-
-    if args.model_ckpt is not None:
+    # Checkpoint selection:
+    # - model_ckpt: baseline checkpoint dir
+    # - load_last_checkpoint: resume from last checkpoint within model_ckpt
+    if args.model_ckpt is not None and args.load_last_checkpoint:
         training_args.load_weights_from = get_last_checkpoint(args.model_ckpt)
     else:
         training_args.load_weights_from = None
@@ -135,85 +144,75 @@ def init_training_args(args):
     return training_args
 
 
-def configure_model_for_train_eval(model, do_train: bool):
-    """
-    Training: disable KV cache (saves memory); Eval/Predict: enable KV cache.
-    """
-    if hasattr(model, "config") and hasattr(model.config, "use_cache"):
-        model.config.use_cache = (not do_train)
-
-
-def maybe_enable_model_checkpointing(model):
-    if hasattr(model, "gradient_checkpointing_enable"):
-        try:
-            model.gradient_checkpointing_enable()
-        except TypeError:
-            model.gradient_checkpointing = True
-
-
+# =========================
+# Main
+# =========================
 def main():
     parser = argparse.ArgumentParser()
+
+    # core
     parser.add_argument("--model", type=str, default="anole")
     parser.add_argument("--data", type=str, nargs="+", required=True)
     parser.add_argument("--data_dir", type=str, default="data_samples")
     parser.add_argument("--decoder_type", type=str, default="anole")
-    parser.add_argument("--note", type=str, default="debug-")
+    parser.add_argument("--input_format", type=str, default="anole")
     parser.add_argument("--image_seq_length", type=int, default=1024)
-    parser.add_argument("--no_perceptual_loss", action="store_true")
+    parser.add_argument("--note", type=str, default="cosre-")
 
-    # model ckpt
-    parser.add_argument("--model_ckpt", type=str, default=None, help="Path to a checkpoint dir.")
-    parser.add_argument("--load_last_checkpoint", action="store_true")
-
-    # train/eval/predict
+    # stage flags
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_eval", action="store_true")
     parser.add_argument("--do_predict", action="store_true")
+
+    # config/output
     parser.add_argument("--cfg_path", type=str, default="cfg")
-    parser.add_argument("--patience", type=int, default=5)
-
-    parser.add_argument("--input_format", type=str, default="anole")
-
-    # output/logging
     parser.add_argument("--output", type=str, default="outputs")
-    parser.add_argument("--report_to", type=str, default="wandb")
+    parser.add_argument("--report_to", type=str, default="none")
     parser.add_argument("--cache_dir", type=str, default=None)
 
-    # seed/ddp
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--local_rank", type=int)
+    # checkpoint
+    parser.add_argument("--model_ckpt", type=str, default=None, help="Baseline checkpoint dir to load.")
+    parser.add_argument("--load_last_checkpoint", action="store_true", help="Resume from last checkpoint in model_ckpt.")
 
-    # debug
+    # runtime
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--local_rank", type=int, default=None)
+
+    # memory / deepspeed
+    parser.add_argument("--deepspeed_config", type=str, default=None, help="Path to deepspeed json, optional.")
+
+    # debug / batch
     parser.add_argument("--toy", action="store_true")
     parser.add_argument("--train_bz", type=int, default=None)
     parser.add_argument("--val_bz", type=int, default=None)
     parser.add_argument("--grad_acc", type=int, default=None)
 
-    # ====== CoSRe-specific CLI flags (inference-time) ======
-    parser.add_argument(
-        "--enable_CoSRe",
-        action="store_true",
-        help="Enable CoSRe decoding / KV-cache compression during eval/predict.",
-    )
-    parser.add_argument("--cosre_block", type=int, default=8, help="Block size b for blockwise cosine compression.")
-    parser.add_argument("--cosre_keep_h", type=int, default=4, help="Keep low-freq spatial height per block.")
-    parser.add_argument("--cosre_keep_w", type=int, default=4, help="Keep low-freq spatial width per block.")
-    parser.add_argument("--cosre_slots", type=int, default=32, help="Number of shared semantic slots K.")
-    parser.add_argument("--cosre_base_delta", type=float, default=0.5, help="Base quant step for Delta(u,v).")
+    # perceptual loss
+    parser.add_argument("--no_perceptual_loss", action="store_true")
+
+    # ===== CoSRe inference-time params =====
+    parser.add_argument("--enable_CoSRe", action="store_true")
+    parser.add_argument("--cosre_block", type=int, default=8)
+    parser.add_argument("--cosre_keep_h", type=int, default=4)
+    parser.add_argument("--cosre_keep_w", type=int, default=4)
+    parser.add_argument("--cosre_slots", type=int, default=32)
+    parser.add_argument("--cosre_base_delta", type=float, default=0.5)
 
     args = parser.parse_args()
 
-    if args.model in ["anole"]:
-        args.decoder_type = args.model
+    # model constraints
+    if args.model == "anole":
+        args.decoder_type = "anole"
         assert args.input_format == "anole"
 
-    if args.decoder_type in ["anole"]:
-        args.note = args.note + f"image_seq_len-{args.image_seq_length}-"
+    args.note = args.note + f"image_seq_len-{args.image_seq_length}-"
 
+    # training args
     training_args = init_training_args(args)
 
     # ===== Load data =====
-    print(f"Preparing the {args.data} dataset... ")
+    if is_rank0():
+        print(f"Preparing dataset: {args.data} from {args.data_dir}")
     data = load_data(dataset=args.data, data_dir=args.data_dir)
 
     if len(data) == 2:
@@ -225,13 +224,12 @@ def main():
             train_split, eval_split, test_split = data["train"], data["validation"], data["test"]
 
     if args.toy:
-        print("Only using toy examples for debugging...")
-        max_train_toy, max_eval_toy, max_test_toy = 100, 10, 10
-        train_split = train_split.select(list(range(min(max_train_toy, len(train_split)))))
+        if is_rank0():
+            print("Using toy subset for debugging...")
+        train_split = train_split.select(list(range(min(100, len(train_split)))))
         if eval_split is not None:
-            eval_split = eval_split.select(list(range(min(max_eval_toy, len(eval_split)))))
-        if test_split is not None:
-            test_split = test_split.select(list(range(min(max_test_toy, len(test_split)))))
+            eval_split = eval_split.select(list(range(min(10, len(eval_split)))))
+        test_split = test_split.select(list(range(min(10, len(test_split)))))
 
     # ===== Load model =====
     model_processor = load_model(args)
@@ -239,25 +237,22 @@ def main():
 
     maybe_enable_model_checkpointing(model)
 
-    # Training should not use KV cache; eval/predict should.
-    # We’ll switch right before calling evaluate/predict.
-    configure_model_for_train_eval(model, do_train=args.do_train)
+    # Training: cache OFF; Eval/Predict: we will switch to ON before generating
+    set_model_cache(model, use_cache=not args.do_train)
 
     # ===== Tokenize =====
-    rank, world_size = get_rank_world()
-
+    rank, world = get_rank_world()
     if eval_split is not None:
-        # make eval/test divisible by global batch size for DDP
-        gbs_eval = training_args.per_device_eval_batch_size * world_size
-        eval_data_num = (len(eval_split) // gbs_eval) * gbs_eval
-        test_data_num = (len(test_split) // gbs_eval) * gbs_eval
-        eval_split = eval_split.select(list(range(eval_data_num)))
-        test_split = test_split.select(list(range(test_data_num)))
-        print(f"Eval Num: {eval_data_num}")
-    else:
-        print("No eval split detected; skipping eval truncation.")
+        # Make eval/test divisible by global eval batch size for DDP
+        gbs = training_args.per_device_eval_batch_size * world
+        eval_n = (len(eval_split) // gbs) * gbs
+        test_n = (len(test_split) // gbs) * gbs
+        eval_split = eval_split.select(list(range(eval_n)))
+        test_split = test_split.select(list(range(test_n)))
+        if is_rank0():
+            print(f"Eval Num (DDP-aligned): {eval_n}")
 
-    tokenized_data, max_source_length, max_target_length = tokenize_dataset(
+    tokenized_data, _, max_target_length = tokenize_dataset(
         train_split=train_split,
         eval_split=eval_split,
         test_split=test_split,
@@ -268,22 +263,25 @@ def main():
         data_name="-".join(args.data),
     )
 
-    training_args.generation_max_new_tokens = max_target_length + 100
-    print(f"generation_max_new_tokens: {training_args.generation_max_new_tokens}")
+    training_args.generation_max_new_tokens = int(max_target_length) + 100
+    if is_rank0():
+        print(f"generation_max_new_tokens: {training_args.generation_max_new_tokens}")
 
-    # ===== Data collator & trainer =====
+    # ===== CoSRe stopping criteria for anole =====
+    kwargs = {}
+    if args.model == "anole":
+        kwargs["multimodal_generation_mode"] = "interleaved-text-image"
+        stop = StoppingCriteriaList(
+            [StopStringCriteria(stop_strings=["<reserved08706>", "</s>"], tokenizer=processor.tokenizer)]
+        )
+        kwargs["stopping_criteria"] = stop
+        training_args.customize_gen_stopping_criteria = stop
+
+    # ===== Trainer =====
     from utils.data_collator import customize_data_collator
     from utils.trainer.customize_trainer import CustomizeSeq2SeqTrainer
 
     training_args.label_smoothing_factor = 0.1
-
-    kwargs = {}
-    if args.model in ["anole"]:
-        kwargs["multimodal_generation_mode"] = "interleaved-text-image"
-        kwargs["stopping_criteria"] = StoppingCriteriaList(
-            [StopStringCriteria(stop_strings=["<reserved08706>", "</s>"], tokenizer=processor.tokenizer)]
-        )
-        training_args.customize_gen_stopping_criteria = kwargs["stopping_criteria"]
 
     trainer = CustomizeSeq2SeqTrainer(
         args=training_args,
@@ -294,31 +292,27 @@ def main():
         train_dataset=tokenized_data["train"],
         eval_dataset=tokenized_data["eval"] if "eval" in tokenized_data else tokenized_data["test"],
         eval_examples=eval_split if "eval" in tokenized_data else test_split,
-        wandb_run_dir=wandb.run.dir if (args.report_to == "wandb" and rank == 0) else None,
+        wandb_run_dir=None,  # keep None unless your Trainer explicitly needs it
         image_loss_func=not args.no_perceptual_loss,
     )
 
-    print("CoSRe Trainer built successfully.")
-
-    # ===== OPTIONAL: Attach CoSRe decoding hook =====
-    # This does NOT affect training. It only affects evaluate()/predict() generation.
-    if training_args.enable_CoSRe:
-        try:
-            # implement this function in your repo OR ignore this block and handle inside Trainer
-            from utils.cosre_hook import attach_cosre_for_generation
-            attach_cosre_for_generation(trainer=trainer, processor=processor)
-            logger.info("CoSRe decoding hook attached (eval/predict only).")
-        except Exception as e:
-            logger.warning(
-                f"enable_CoSRe=True but utils.cosre_hook.attach_cosre_for_generation() not found/failed: {e}. "
-                "Make sure CustomizeSeq2SeqTrainer reads training_args.enable_CoSRe and switches decoding."
+    if is_rank0():
+        print("CoSRe Trainer built successfully.")
+        if training_args.enable_CoSRe:
+            print(
+                f"CoSRe enabled for eval/predict: block={training_args.cosre_block}, "
+                f"keep=({training_args.cosre_keep_h},{training_args.cosre_keep_w}), "
+                f"slots={training_args.cosre_slots}, delta={training_args.cosre_base_delta}"
             )
 
+    # resume checkpoint (training)
     checkpoint = training_args.load_weights_from
 
     # ===== Train =====
     if args.do_train:
-        # KV cache OFF already
+        # ensure cache OFF
+        set_model_cache(trainer.model, use_cache=False)
+
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
 
@@ -328,35 +322,36 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    # ===== Eval / Predict =====
+    # ===== Eval =====
     if args.do_eval:
-        # CoSRe needs cache ON during generation/eval
-        configure_model_for_train_eval(trainer.model, do_train=False)
+        # CoSRe benefits require cache ON during generation
+        set_model_cache(trainer.model, use_cache=True)
 
         logger.info("*** Evaluate ***")
         metrics = trainer.evaluate(metric_key_prefix="eval", **kwargs)
 
-        if metrics:
-            if "eval" in tokenized_data:
-                metrics["eval_samples"] = len(tokenized_data["eval"])
-            else:
-                metrics["eval_samples"] = len(tokenized_data["test"])
+        if metrics and is_rank0():
+            n = len(tokenized_data["eval"]) if "eval" in tokenized_data else len(tokenized_data["test"])
+            metrics["eval_samples"] = n
             trainer.log_metrics("eval", metrics)
             trainer.save_metrics("eval", metrics)
 
-        if args.do_predict:
-            logger.info("*** Predict ***")
-            predict_results = trainer.predict(
-                test_dataset=tokenized_data["test"],
-                test_examples=tokenized_data["test"].dataset,
-                metric_key_prefix="predict",
-                **kwargs,
-            )
-            pmetrics = predict_results.metrics
-            if pmetrics:
-                pmetrics["predict_samples"] = len(tokenized_data["test"])
-                trainer.log_metrics("predict", pmetrics)
-                trainer.save_metrics("predict", pmetrics)
+    # ===== Predict =====
+    if args.do_predict:
+        set_model_cache(trainer.model, use_cache=True)
+
+        logger.info("*** Predict ***")
+        predict_results = trainer.predict(
+            test_dataset=tokenized_data["test"],
+            test_examples=tokenized_data["test"].dataset,
+            metric_key_prefix="predict",
+            **kwargs,
+        )
+        pmetrics = predict_results.metrics
+        if pmetrics and is_rank0():
+            pmetrics["predict_samples"] = len(tokenized_data["test"])
+            trainer.log_metrics("predict", pmetrics)
+            trainer.save_metrics("predict", pmetrics)
 
 
 if __name__ == "__main__":

@@ -26,30 +26,34 @@ At the top level:
 
 ```text
 CoSRe/
-├── cfg/                       # YAML / config files (model, data, optimization, deepspeed, etc.)
+├── cfg/                         # YAML / config files (model, data, deepspeed, etc.)
 ├── model_utils/
-│   ├── cosre/                 # Core CoSRe implementation
-│   │   ├── cosine_codec.py    # Blockwise cosine transform + quantization + reconstruction
-│   │   ├── shared_residual.py # Shared-slot extraction and modality residual formation
-│   │   ├── controller.py      # CoSRe controller / decoding interfaces
-│   │   ├── hooks.py           # Optional generation hooks
-│   │   └── __init__.py
-│   ├── logging.py             # Logging helpers
-│   └── wrapped_visualizer.py  # Optional visualization / debugging utilities
-├── prompt/                    # Prompt templates and instruction formats
-├── utils/                     # Common utilities (data loading, evaluation)
-├── traino.py                  # Baseline Anole training (no CoSRe)
-├── train_CoSRe.py             # CoSRe driver (baseline + CoSRe decoding)
-├── traino.sh                  # Baseline launcher
-├── train_CoSRe.sh             # CoSRe launcher
-├── requirements.txt           # Full dependency list
-├── requirements_clean.txt     # Minimal dependency list
-└── README.md                  # This file
+│   ├── cosre/                   # Core CoSRe implementation (lowercase, Pythonic)
+│   │   ├── __init__.py
+│   │   ├── config.py            # CoSReConfig dataclass
+│   │   ├── controller.py        # CoSRe controller (prefix construction)
+│   │   ├── cosine_codec.py      # Blockwise cosine transform + quantization
+│   │   ├── shared_residual.py   # Shared–residual semantic factorization
+│   │   └── hooks.py             # Generation-time hooks (prefix injection)
+│   ├── logging.py               # Logging helpers
+│   └── wrapped_visualizer.py    # Optional visualization / debugging utilities
+├── prompt/                      # Prompt templates and instruction formats
+├── utils/                       # Common utilities (data loading, evaluation)
+│   └── trainer/
+│       └── CustomizeSeq2SeqTrainer.py
+├── traino.py                    # Baseline Anole training (no CoSRe)
+├── train_CoSRe.py               # CoSRe driver (baseline + CoSRe decoding)
+├── traino.sh                    # Baseline launcher
+├── train_CoSRe.sh               # CoSRe launcher
+├── requirements.txt             # Full dependency list
+├── requirements_clean.txt       # Minimal dependency list
+└── README.md                    # This file
+
 ````
 
 ---
 
-## 2. Environment Setup
+## 2. Environment Setupá
 
 We recommend **conda** with **Python 3.10**.
 
@@ -197,43 +201,4 @@ torchrun --nproc_per_node=4 train_CoSRe.py \
 
 ---
 
-## 6. Implementation Notes
 
-### Integration point
-
-CoSRe operates at **generation time**:
-
-* `CustomizeSeq2SeqTrainer` switches decoding when `enable_CoSRe=True`, or
-* `VisualizationEvaluator` calls a CoSRe decoding wrapper
-
-### KV-cache behavior
-
-* **Training:** `use_cache=False` (memory efficient)
-* **Eval / Predict:** `use_cache=True` (CoSRe compresses cache growth)
-
----
-
-## 7. License & Acknowledgements
-
-Built on:
-
-* **Anole** multimodal LLM
-* **MVoT** interleaved visual–text reasoning framework
-
-<!-- Please cite the corresponding works when using this repository.
-
-````
-
----
-
-### ✅ Summary of fixes
-- ✔ Removed duplicate headers  
-- ✔ Closed **all** code blocks  
-- ✔ Removed outer ```markdown fence  
-- ✔ GitHub-safe, Markdown-compliant  
-
-If you want, next I can:
-- Align this README **exactly** to your real `model_utils/` files
-- Generate a **diff vs DARE README** (for NeurIPS appendix)
-- Tighten language for **camera-ready submission**
-```` -->
