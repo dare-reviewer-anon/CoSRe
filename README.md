@@ -197,8 +197,6 @@ torchrun --nproc_per_node=4 train_CoSRe.py \
 * `--cosre_base_delta`
   Base quantization step.
 
-> Tip: start conservatively (`keep_h=6 keep_w=6 base_delta=0.25`) and tighten.
-
 ---
 
 
