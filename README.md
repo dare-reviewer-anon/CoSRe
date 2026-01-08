@@ -53,7 +53,8 @@ CoSRe/
 
 ---
 
-## 2. Environment Setupá
+## 2. Environment Setup
+
 
 We recommend **conda** with **Python 3.10**.
 

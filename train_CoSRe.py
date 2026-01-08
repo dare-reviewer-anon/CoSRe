@@ -41,7 +41,7 @@ def set_model_cache(model, use_cache: bool):
         model.config.use_cache = bool(use_cache)
 
 
-def maybe_enable_model_checkpointing(model):
+def do_enable_model_checkpointing(model):
     if hasattr(model, "gradient_checkpointing_enable"):
         try:
             model.gradient_checkpointing_enable()
@@ -235,7 +235,7 @@ def main():
     model_processor = load_model(args)
     model, processor = model_processor["model"], model_processor["processor"]
 
-    maybe_enable_model_checkpointing(model)
+    do_enable_model_checkpointing(model)
 
     # Training: cache OFF; Eval/Predict: we will switch to ON before generating
     set_model_cache(model, use_cache=not args.do_train)
