@@ -28,7 +28,7 @@ At the top level:
 CoSRe/
 ├── cfg/                         # YAML / config files (model, data, deepspeed, etc.)
 ├── model_utils/
-│   ├── cosre/                   # Core CoSRe implementation (lowercase, Pythonic)
+│   ├── cosre/                   # Core CoSRe implementation
 │   │   ├── __init__.py
 │   │   ├── config.py            # CoSReConfig dataclass
 │   │   ├── controller.py        # CoSRe controller (prefix construction)
@@ -68,7 +68,7 @@ pip install -r requirements.txt --user
 # pip install -r requirements_clean.txt --user
 ```
 
-**Hardware:** Experiments are typically run on multi-GPU systems (e.g., **4× A100 40GB**).
+**Hardware:** Experiments are typically run on multi-GPU systems (e.g., **4× H100**).
 NCCL and DeepSpeed must be available for `torchrun`.
 
 ---
